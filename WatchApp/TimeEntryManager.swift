@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import UIKit
 
 // MARK: - Watch Model
 
@@ -14,11 +15,13 @@ struct Watch: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String
     var brand: String
+    var photoFilenames: [String]
 
-    init(id: UUID = UUID(), name: String, brand: String = "") {
+    init(id: UUID = UUID(), name: String, brand: String = "", photoFilenames: [String] = []) {
         self.id = id
         self.name = name
         self.brand = brand
+        self.photoFilenames = photoFilenames
     }
 
     var displayName: String {
@@ -105,6 +108,7 @@ class TimeEntryManager: ObservableObject {
     }
 
     func removeWatch(_ watch: Watch) {
+        watch.photoFilenames.forEach { deletePhoto(filename: $0, from: watch) }
         watches.removeAll { $0.id == watch.id }
         entries.removeAll { $0.watchID == watch.id }
     }
@@ -119,7 +123,7 @@ class TimeEntryManager: ObservableObject {
             let watchName = watches.first(where: { $0.id == entry.watchID })?.displayName ?? ""
             let recorded = formatter.string(from: entry.recorded)
             let custom = entry.custom.map { formatter.string(from: $0) } ?? ""
-            let delta = entry.custom.map { String(format: "%0.2f", $0.timeIntervalSince(entry.recorded)) } ?? ""
+            let delta = entry.custom.map { String($0.timeIntervalSince(entry.recorded)) } ?? ""
             csv.append("\(watchName),\(recorded),\(custom),\(delta)\n")
         }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("watch_log.csv")
@@ -130,6 +134,48 @@ class TimeEntryManager: ObservableObject {
             print("CSV export failed:", error)
             return nil
         }
+    }
+
+
+    // MARK: - Photo Storage
+
+    func addPhoto(_ image: UIImage, to watch: Watch) -> Watch? {
+        let filename = "watch_photo_\(watch.id.uuidString)_\(UUID().uuidString).jpg"
+        let url = photoURL(for: filename)
+        guard let data = image.jpegData(compressionQuality: 0.8) else { return nil }
+        do {
+            try data.write(to: url, options: .atomic)
+            var updated = watch
+            updated.photoFilenames.append(filename)
+            updateWatch(updated)
+            return updated
+        } catch {
+            print("Failed to save photo:", error)
+            return nil
+        }
+    }
+
+    func loadPhoto(filename: String) -> UIImage? {
+        let url = photoURL(for: filename)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return UIImage(data: data)
+    }
+
+    func loadPhotos(for watch: Watch) -> [UIImage] {
+        watch.photoFilenames.compactMap { loadPhoto(filename: $0) }
+    }
+
+    func deletePhoto(filename: String, from watch: Watch) {
+        let url = photoURL(for: filename)
+        try? FileManager.default.removeItem(at: url)
+        var updated = watch
+        updated.photoFilenames.removeAll { $0 == filename }
+        updateWatch(updated)
+    }
+
+    private func photoURL(for filename: String) -> URL {
+        let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return docDir.appendingPathComponent(filename)
     }
 
     // MARK: - Persistence

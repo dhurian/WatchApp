@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import PhotosUI
 
 // MARK: - Helpers
 
@@ -75,6 +76,7 @@ struct WatchesView: View {
     @Binding var selectedWatch: Watch?
     @State private var showingAddSheet = false
     @State private var editingWatch: Watch? = nil
+    @State private var galleryWatch: Watch? = nil
 
     var body: some View {
         NavigationStack {
@@ -86,7 +88,13 @@ struct WatchesView: View {
                 } else {
                     List {
                         ForEach(manager.watches) { watch in
-                            HStack {
+                            HStack(spacing: 12) {
+                                WatchThumbnail(manager: manager, watch: watch)
+                                    .onTapGesture {
+                                        if !watch.photoFilenames.isEmpty {
+                                            galleryWatch = watch
+                                        }
+                                    }
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(watch.name).font(.headline)
                                     if !watch.brand.isEmpty {
@@ -136,7 +144,84 @@ struct WatchesView: View {
             .sheet(item: $editingWatch) { watch in
                 WatchFormSheet(manager: manager, watch: watch)
             }
+            .fullScreenCover(item: $galleryWatch) { watch in
+                PhotoGalleryView(manager: manager, watch: watch)
+            }
         }
+    }
+}
+
+// MARK: - PhotoGalleryView
+
+struct PhotoGalleryView: View {
+    @ObservedObject var manager: TimeEntryManager
+    let watch: Watch
+    @State private var currentIndex: Int = 0
+    @Environment(\.dismiss) private var dismiss
+
+    private var photos: [UIImage] {
+        manager.watches.first(where: { $0.id == watch.id })?.photoFilenames.compactMap {
+            manager.loadPhoto(filename: $0)
+        } ?? []
+    }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+            if photos.isEmpty {
+                ContentUnavailableView("No Photos", systemImage: "photo")
+                    .colorScheme(.dark)
+            } else {
+                TabView(selection: $currentIndex) {
+                    ForEach(Array(photos.enumerated()), id: \.offset) { index, img in
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFit()
+                            .tag(index)
+                    }
+                }
+                .tabViewStyle(.page)
+                .indexViewStyle(.page(backgroundDisplayMode: .always))
+            }
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.white, .black.opacity(0.5))
+                    .padding(20)
+            }
+        }
+    }
+}
+
+// MARK: - WatchThumbnail
+
+struct WatchThumbnail: View {
+    let image: UIImage?
+    let size: CGFloat
+
+    init(manager: TimeEntryManager, watch: Watch, size: CGFloat = 48) {
+        self.image = watch.photoFilenames.first.flatMap { manager.loadPhoto(filename: $0) }
+        self.size = size
+    }
+
+    var body: some View {
+        Group {
+            if let img = image {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "watchface.applewatch.case")
+                    .font(.system(size: size * 0.45))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(.systemGray5))
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.2))
     }
 }
 
@@ -148,11 +233,87 @@ struct WatchFormSheet: View {
 
     @State private var name: String = ""
     @State private var brand: String = ""
+    @State private var selectedPhoto: PhotosPickerItem? = nil
+    @State private var newImages: [UIImage] = []
+    @State private var showingCamera = false
     @Environment(\.dismiss) private var dismiss
+
+    private var existingFilenames: [String] {
+        guard let w = watch else { return [] }
+        return manager.watches.first(where: { $0.id == w.id })?.photoFilenames ?? w.photoFilenames
+    }
 
     var body: some View {
         NavigationStack {
             Form {
+                Section("Photos") {
+                    let cols = [GridItem(.adaptive(minimum: 90), spacing: 8)]
+                    LazyVGrid(columns: cols, spacing: 8) {
+                        // Existing saved photos
+                        ForEach(existingFilenames, id: \.self) { filename in
+                            if let img = manager.loadPhoto(filename: filename) {
+                                ZStack(alignment: .topTrailing) {
+                                    Image(uiImage: img)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 90, height: 90)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    Button {
+                                        if let w = watch {
+                                            manager.deletePhoto(filename: filename, from: w)
+                                        }
+                                    } label: {
+                                        Image(systemName: "minus.circle.fill")
+                                            .foregroundStyle(.white, .red)
+                                            .padding(4)
+                                    }
+                                }
+                            }
+                        }
+                        // New unsaved preview images
+                        ForEach(Array(newImages.enumerated()), id: \.offset) { index, img in
+                            ZStack(alignment: .topTrailing) {
+                                Image(uiImage: img)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 90, height: 90)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                Button {
+                                    newImages.remove(at: index)
+                                } label: {
+                                    Image(systemName: "minus.circle.fill")
+                                        .foregroundStyle(.white, .red)
+                                        .padding(4)
+                                }
+                            }
+                        }
+                        // Add button
+                        Menu {
+                            PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                                Label("Choose from Library", systemImage: "photo.on.rectangle")
+                            }
+                            Button {
+                                showingCamera = true
+                            } label: {
+                                Label("Take Photo", systemImage: "camera")
+                            }
+                        } label: {
+                            VStack(spacing: 6) {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 28))
+                                Text("Add")
+                                    .font(.caption)
+                            }
+                            .foregroundStyle(.secondary)
+                            .frame(width: 90, height: 90)
+                            .background(Color(.systemGray5))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    .listRowBackground(Color.clear)
+                }
+
                 Section("Watch Details") {
                     TextField("Name", text: $name)
                     TextField("Brand (optional)", text: $brand)
@@ -171,8 +332,15 @@ struct WatchFormSheet: View {
                             existing.name = trimmedName
                             existing.brand = brand.trimmingCharacters(in: .whitespaces)
                             manager.updateWatch(existing)
+                            for img in newImages { _ = manager.addPhoto(img, to: existing) }
                         } else {
-                            manager.addWatch(Watch(name: trimmedName, brand: brand.trimmingCharacters(in: .whitespaces)))
+                            var newWatch = Watch(name: trimmedName, brand: brand.trimmingCharacters(in: .whitespaces))
+                            manager.addWatch(newWatch)
+                            for img in newImages {
+                                if let updated = manager.addPhoto(img, to: newWatch) {
+                                    newWatch = updated
+                                }
+                            }
                         }
                         dismiss()
                     }
@@ -183,8 +351,55 @@ struct WatchFormSheet: View {
                 name = watch?.name ?? ""
                 brand = watch?.brand ?? ""
             }
+            .onChange(of: selectedPhoto) { _, newItem in
+                Task {
+                    if let data = try? await newItem?.loadTransferable(type: Data.self),
+                       let img = UIImage(data: data) {
+                        newImages.append(img)
+                        selectedPhoto = nil
+                    }
+                }
+            }
+            .sheet(isPresented: $showingCamera) {
+                CameraAppendView { img in newImages.append(img) }
+            }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.large])
+    }
+}
+
+// MARK: - CameraAppendView
+
+struct CameraAppendView: UIViewControllerRepresentable {
+    let onCapture: (UIImage) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let parent: CameraAppendView
+        init(_ parent: CameraAppendView) { self.parent = parent }
+
+        func imagePickerController(_ picker: UIImagePickerController,
+                                   didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            if let img = info[.originalImage] as? UIImage {
+                parent.onCapture(img)
+            }
+            parent.dismiss()
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.dismiss()
+        }
     }
 }
 
@@ -270,12 +485,6 @@ struct StatisticsView: View {
                 List {
                     Section("Latest Measurement") {
                         if let entry = latestEntry, let custom = entry.custom {
-                            HStack {
-                                Label("Day", systemImage: "calendar")
-                                Spacer()
-                                Text(entry.recorded, format: .dateTime.weekday(.wide).month(.abbreviated).day().year())
-                                    .foregroundStyle(.secondary)
-                            }
                             HStack {
                                 Label("Recorded", systemImage: "iphone")
                                 Spacer()
