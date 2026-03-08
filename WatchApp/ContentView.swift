@@ -37,12 +37,10 @@ private func isSyncEvent(_ entry: TimeEntry) -> Bool {
 
 enum ActiveSheet: Identifiable {
     case customTime
-    case exporter(URL)
 
     var id: Int {
         switch self {
         case .customTime: return 0
-        case .exporter: return 1
         }
     }
 }
@@ -800,8 +798,6 @@ struct ContentView: View {
                     }
                     .presentationDetents([.medium, .large])
 
-                case .exporter(let url):
-                    ShareSheet(activityItems: [url])
                 }
             }
         }
@@ -814,11 +810,17 @@ struct FunctionsView: View {
     @EnvironmentObject var manager: TimeEntryManager
     @Binding var selectedWatch: Watch?
 
-    @State private var exportURL: URL? = nil
-    @State private var showingExporter = false
     @State private var showingImporter = false
     @State private var importResult: ImportResult? = nil
     @State private var showingImportAlert = false
+    @State private var cachedExportURL: URL? = nil
+
+    private func prepareExport() {
+        Task.detached(priority: .userInitiated) {
+            let url = await MainActor.run { manager.getCSVURL(for: selectedWatch) }
+            await MainActor.run { cachedExportURL = url }
+        }
+    }
 
     enum ImportResult {
         case success(Int)
@@ -843,13 +845,13 @@ struct FunctionsView: View {
         NavigationStack {
             List {
                 Section("Export") {
-                    Button {
-                        if let url = manager.getCSVURL(for: selectedWatch) {
-                            exportURL = url
-                            showingExporter = true
+                    if let url = cachedExportURL {
+                        ShareLink(item: url, preview: SharePreview("watch_log.csv", image: Image(systemName: "doc.text"))) {
+                            Label("Export CSV", systemImage: "square.and.arrow.up")
                         }
-                    } label: {
+                    } else {
                         Label("Export CSV", systemImage: "square.and.arrow.up")
+                            .foregroundStyle(.secondary)
                     }
                     if selectedWatch != nil {
                         Text("Exports entries for the selected watch only.")
@@ -875,11 +877,10 @@ struct FunctionsView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Functions")
-            .sheet(isPresented: $showingExporter) {
-                if let url = exportURL {
-                    ShareSheet(activityItems: [url])
-                }
-            }
+            .onAppear { prepareExport() }
+            .onChange(of: selectedWatch) { prepareExport() }
+            .onChange(of: manager.entries) { prepareExport() }
+
             .fileImporter(
                 isPresented: $showingImporter,
                 allowedContentTypes: [.commaSeparatedText, .plainText],
@@ -909,17 +910,7 @@ struct FunctionsView: View {
     }
 }
 
-// MARK: - ShareSheet
 
-struct ShareSheet: UIViewControllerRepresentable {
-    var activityItems: [Any]
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
-    }
-
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-}
 
 // MARK: - Preview
 
