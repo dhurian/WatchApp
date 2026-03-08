@@ -119,7 +119,7 @@ class TimeEntryManager: ObservableObject {
             let watchName = watches.first(where: { $0.id == entry.watchID })?.displayName ?? ""
             let recorded = formatter.string(from: entry.recorded)
             let custom = entry.custom.map { formatter.string(from: $0) } ?? ""
-            let delta = entry.custom.map { String($0.timeIntervalSince(entry.recorded)) } ?? ""
+            let delta = entry.custom.map { String(format: "%0.2f", $0.timeIntervalSince(entry.recorded)) } ?? ""
             csv.append("\(watchName),\(recorded),\(custom),\(delta)\n")
         }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("watch_log.csv")
