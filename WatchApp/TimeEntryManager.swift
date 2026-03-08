@@ -8,71 +8,120 @@
 import Foundation
 import Combine
 
-// MARK: - Model
+// MARK: - Watch Model
+
+struct Watch: Identifiable, Codable, Hashable {
+    let id: UUID
+    var name: String
+    var brand: String
+
+    init(id: UUID = UUID(), name: String, brand: String = "") {
+        self.id = id
+        self.name = name
+        self.brand = brand
+    }
+
+    var displayName: String {
+        brand.isEmpty ? name : "\(brand) – \(name)"
+    }
+}
+
+// MARK: - TimeEntry Model
+
 struct TimeEntry: Identifiable, Codable, Hashable {
     let id: UUID
     var recorded: Date
     var custom: Date?
-    
-    init(id: UUID = UUID(), recorded: Date, custom: Date? = nil) {
+    var watchID: UUID?
+
+    init(id: UUID = UUID(), recorded: Date, custom: Date? = nil, watchID: UUID? = nil) {
         self.id = id
         self.recorded = recorded
         self.custom = custom
+        self.watchID = watchID
     }
 }
 
-// MARK: - Manager
-class TimeEntryManager: ObservableObject {
-    
-    @Published var entries: [TimeEntry] = [] {
-        didSet {
-            save()
-           
-        }
-    }
-    
-    private let fileURL: URL
-    private var cachedCSV: URL?
+// MARK: - TimeEntryManager
 
-    
-    init(fileName: String = "time_entries.json") {
-        let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        self.fileURL = docDir.appendingPathComponent(fileName)
-        load()                       // Load entries from disk
-        //generateCSVIfNeeded()        // Pre-generate CSV immediately
-            
+class TimeEntryManager: ObservableObject {
+
+    @Published var entries: [TimeEntry] = [] {
+        didSet { saveEntries() }
     }
-    
-    // MARK: - CRUD
+
+    @Published var watches: [Watch] = [] {
+        didSet { saveWatches() }
+    }
+
+    private let entriesURL: URL
+    private let watchesURL: URL
+
+    init() {
+        let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        self.entriesURL = docDir.appendingPathComponent("time_entries.json")
+        self.watchesURL = docDir.appendingPathComponent("watches.json")
+        loadEntries()
+        loadWatches()
+    }
+
+    // MARK: - Entry CRUD
+
     func add(_ entry: TimeEntry) {
         entries.append(entry)
         entries.sort { $0.recorded > $1.recorded }
     }
-    
+
     func update(_ entry: TimeEntry) {
         guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
         entries[index] = entry
     }
-    
+
     func remove(_ entry: TimeEntry) {
         entries.removeAll { $0.id == entry.id }
     }
-    
-    func removeAll() {
-        entries.removeAll()
+
+    func removeAll(for watchID: UUID? = nil) {
+        if let watchID = watchID {
+            entries.removeAll { $0.watchID == watchID }
+        } else {
+            entries.removeAll()
+        }
     }
-    
-    // MARK: - CSV Caching
-    func getCSVURL() -> URL? {
+
+    func entries(for watch: Watch) -> [TimeEntry] {
+        entries.filter { $0.watchID == watch.id }
+    }
+
+    // MARK: - Watch CRUD
+
+    func addWatch(_ watch: Watch) {
+        watches.append(watch)
+    }
+
+    func updateWatch(_ watch: Watch) {
+        guard let index = watches.firstIndex(where: { $0.id == watch.id }) else { return }
+        watches[index] = watch
+    }
+
+    func removeWatch(_ watch: Watch) {
+        watches.removeAll { $0.id == watch.id }
+        entries.removeAll { $0.watchID == watch.id }
+    }
+
+    // MARK: - CSV
+
+    func getCSVURL(for watch: Watch? = nil) -> URL? {
         let formatter = ISO8601DateFormatter()
-        var csv = "Recorded Time,Custom Time,Delta Seconds\n"
-        for entry in entries {
+        let subset = watch.map { w in entries.filter { $0.watchID == w.id } } ?? entries
+        var csv = "Watch,Recorded Time,Custom Time,Delta Seconds\n"
+        for entry in subset {
+            let watchName = watches.first(where: { $0.id == entry.watchID })?.displayName ?? ""
             let recorded = formatter.string(from: entry.recorded)
             let custom = entry.custom.map { formatter.string(from: $0) } ?? ""
             let delta = entry.custom.map { String($0.timeIntervalSince(entry.recorded)) } ?? ""
-            csv.append("\(recorded),\(custom),\(delta)\n")
+            csv.append("\(watchName),\(recorded),\(custom),\(delta)\n")
         }
-
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("watch_log.csv")
         do {
             try csv.write(to: url, atomically: true, encoding: .utf8)
@@ -82,24 +131,36 @@ class TimeEntryManager: ObservableObject {
             return nil
         }
     }
-    
+
     // MARK: - Persistence
-    private func save() {
+
+    private func saveEntries() {
         do {
             let data = try JSONEncoder().encode(entries)
-            try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
-        } catch {
-            print("Failed to save entries:", error)
-        }
+            try data.write(to: entriesURL, options: [.atomic, .completeFileProtection])
+        } catch { print("Failed to save entries:", error) }
     }
-    
-    private func load() {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+
+    private func loadEntries() {
+        guard FileManager.default.fileExists(atPath: entriesURL.path) else { return }
         do {
-            let data = try Data(contentsOf: fileURL)
+            let data = try Data(contentsOf: entriesURL)
             entries = try JSONDecoder().decode([TimeEntry].self, from: data)
-        } catch {
-            print("Failed to load entries:", error)
-        }
+        } catch { print("Failed to load entries:", error) }
+    }
+
+    private func saveWatches() {
+        do {
+            let data = try JSONEncoder().encode(watches)
+            try data.write(to: watchesURL, options: [.atomic, .completeFileProtection])
+        } catch { print("Failed to save watches:", error) }
+    }
+
+    private func loadWatches() {
+        guard FileManager.default.fileExists(atPath: watchesURL.path) else { return }
+        do {
+            let data = try Data(contentsOf: watchesURL)
+            watches = try JSONDecoder().decode([Watch].self, from: data)
+        } catch { print("Failed to load watches:", error) }
     }
 }
