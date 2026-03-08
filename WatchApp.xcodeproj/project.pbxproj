@@ -10,9 +10,22 @@
 		33789E132F541BA50081F431 /* WatchApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WatchApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		33B5A9FD2F5D89B90006CBA3 /* Exceptions for "WatchApp" folder in "WatchApp" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 33789E122F541BA50081F431 /* WatchApp */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		33789E152F541BA50081F431 /* WatchApp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				33B5A9FD2F5D89B90006CBA3 /* Exceptions for "WatchApp" folder in "WatchApp" target */,
+			);
 			path = WatchApp;
 			sourceTree = "<group>";
 		};
@@ -256,9 +269,10 @@
 				DEVELOPMENT_TEAM = LRGKY69CGF;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = WatchApp/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSCameraUsageDescription = "\"Used to take photos of your watches\"";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "\"Used to choose photos of your watches\"";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "\"Used to save watches photos\"";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -291,9 +305,10 @@
 				DEVELOPMENT_TEAM = LRGKY69CGF;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = WatchApp/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSCameraUsageDescription = "\"Used to take photos of your watches\"";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "\"Used to choose photos of your watches\"";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "\"Used to save watches photos\"";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

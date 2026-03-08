@@ -13,18 +13,19 @@ struct WatchApp: App {
     var body: some Scene {
         WindowGroup {
             TabView {
-                ContentView(manager: manager, selectedWatch: $selectedWatch)
+                ContentView(selectedWatch: $selectedWatch)
                     .tabItem { Label("Home", systemImage: "house") }
 
-                StatisticsView(manager: manager, selectedWatch: $selectedWatch)
+                StatisticsView(selectedWatch: $selectedWatch)
                     .tabItem { Label("Statistics", systemImage: "chart.bar") }
 
-                SyncView(manager: manager, selectedWatch: $selectedWatch)
-                    .tabItem { Label("Sync", systemImage: "arrow.triangle.2.circlepath") }
-
-                WatchesView(manager: manager, selectedWatch: $selectedWatch)
+                WatchesView(selectedWatch: $selectedWatch)
                     .tabItem { Label("Watches", systemImage: "watchface.applewatch.case") }
+
+                FunctionsView(selectedWatch: $selectedWatch)
+                    .tabItem { Label("Functions", systemImage: "gearshape") }
             }
+            .environmentObject(manager)
         }
     }
 }

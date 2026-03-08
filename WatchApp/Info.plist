@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSCameraUsageDescription</key>
+    <string>Used to take photos of your watches</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Used to choose photos of your watches from your library</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Used to save watch photos</string>
+</dict>
+</plist>
+

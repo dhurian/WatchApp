@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 import PhotosUI
 
 // MARK: - Helpers
@@ -46,33 +47,10 @@ enum ActiveSheet: Identifiable {
     }
 }
 
-// MARK: - RootView
-
-struct RootView: View {
-    @StateObject private var manager = TimeEntryManager()
-    @State private var selectedWatch: Watch? = nil
-
-    var body: some View {
-        TabView {
-            ContentView(manager: manager, selectedWatch: $selectedWatch)
-                .tabItem { Label("Home", systemImage: "house") }
-
-            StatisticsView(manager: manager, selectedWatch: $selectedWatch)
-                .tabItem { Label("Statistics", systemImage: "chart.bar") }
-
-            SyncView(manager: manager, selectedWatch: $selectedWatch)
-                .tabItem { Label("Sync", systemImage: "arrow.triangle.2.circlepath") }
-
-            WatchesView(manager: manager, selectedWatch: $selectedWatch)
-                .tabItem { Label("Watches", systemImage: "watchface.applewatch.case") }
-        }
-    }
-}
-
 // MARK: - WatchesView
 
 struct WatchesView: View {
-    @ObservedObject var manager: TimeEntryManager
+    @EnvironmentObject var manager: TimeEntryManager
     @Binding var selectedWatch: Watch?
     @State private var showingAddSheet = false
     @State private var editingWatch: Watch? = nil
@@ -89,7 +67,7 @@ struct WatchesView: View {
                     List {
                         ForEach(manager.watches) { watch in
                             HStack(spacing: 12) {
-                                WatchThumbnail(manager: manager, watch: watch)
+                                WatchThumbnail(watch: watch)
                                     .onTapGesture {
                                         if !watch.photoFilenames.isEmpty {
                                             galleryWatch = watch
@@ -139,13 +117,13 @@ struct WatchesView: View {
                 }
             }
             .sheet(isPresented: $showingAddSheet) {
-                WatchFormSheet(manager: manager, watch: nil)
+                WatchFormSheet(watch: nil)
             }
             .sheet(item: $editingWatch) { watch in
-                WatchFormSheet(manager: manager, watch: watch)
+                WatchFormSheet(watch: watch)
             }
             .fullScreenCover(item: $galleryWatch) { watch in
-                PhotoGalleryView(manager: manager, watch: watch)
+                PhotoGalleryView(watch: watch)
             }
         }
     }
@@ -154,7 +132,7 @@ struct WatchesView: View {
 // MARK: - PhotoGalleryView
 
 struct PhotoGalleryView: View {
-    @ObservedObject var manager: TimeEntryManager
+    @EnvironmentObject var manager: TimeEntryManager
     let watch: Watch
     @State private var currentIndex: Int = 0
     @Environment(\.dismiss) private var dismiss
@@ -198,11 +176,13 @@ struct PhotoGalleryView: View {
 // MARK: - WatchThumbnail
 
 struct WatchThumbnail: View {
-    let image: UIImage?
+    @EnvironmentObject var manager: TimeEntryManager
+    let watch: Watch
     let size: CGFloat
+    @State private var image: UIImage? = nil
 
-    init(manager: TimeEntryManager, watch: Watch, size: CGFloat = 48) {
-        self.image = watch.photoFilenames.first.flatMap { manager.loadPhoto(filename: $0) }
+    init(watch: Watch, size: CGFloat = 48) {
+        self.watch = watch
         self.size = size
     }
 
@@ -222,13 +202,17 @@ struct WatchThumbnail: View {
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: size * 0.2))
+        .task {
+            guard let filename = watch.photoFilenames.first else { return }
+            image = manager.loadPhoto(filename: filename)
+        }
     }
 }
 
 // MARK: - WatchFormSheet
 
 struct WatchFormSheet: View {
-    @ObservedObject var manager: TimeEntryManager
+    @EnvironmentObject var manager: TimeEntryManager
     var watch: Watch?
 
     @State private var name: String = ""
@@ -236,6 +220,7 @@ struct WatchFormSheet: View {
     @State private var selectedPhoto: PhotosPickerItem? = nil
     @State private var newImages: [UIImage] = []
     @State private var showingCamera = false
+    @State private var showingPhotoPicker = false
     @Environment(\.dismiss) private var dismiss
 
     private var existingFilenames: [String] {
@@ -289,7 +274,9 @@ struct WatchFormSheet: View {
                         }
                         // Add button
                         Menu {
-                            PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                            Button {
+                                showingPhotoPicker = true
+                            } label: {
                                 Label("Choose from Library", systemImage: "photo.on.rectangle")
                             }
                             Button {
@@ -360,6 +347,7 @@ struct WatchFormSheet: View {
                     }
                 }
             }
+            .photosPicker(isPresented: $showingPhotoPicker, selection: $selectedPhoto, matching: .images)
             .sheet(isPresented: $showingCamera) {
                 CameraAppendView { img in newImages.append(img) }
             }
@@ -376,60 +364,34 @@ struct CameraAppendView: UIViewControllerRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
-        picker.sourceType = .camera
-        picker.delegate = context.coordinator
-        return picker
+    func makeUIViewController(context: Context) -> FullCameraViewController {
+        let vc = FullCameraViewController()
+        vc.onCapture = onCapture
+        vc.onDismiss = { context.coordinator.parent.dismiss() }
+        return vc
     }
 
-    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+    func updateUIViewController(_ uiViewController: FullCameraViewController, context: Context) {}
 
-    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    class Coordinator: NSObject {
         let parent: CameraAppendView
         init(_ parent: CameraAppendView) { self.parent = parent }
-
-        func imagePickerController(_ picker: UIImagePickerController,
-                                   didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
-            if let img = info[.originalImage] as? UIImage {
-                parent.onCapture(img)
-            }
-            parent.dismiss()
-        }
-
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            parent.dismiss()
-        }
     }
 }
 
 // MARK: - StatisticsView
 
 struct StatisticsView: View {
-    @ObservedObject var manager: TimeEntryManager
+    @EnvironmentObject var manager: TimeEntryManager
     @Binding var selectedWatch: Watch?
 
-    private var filteredEntries: [TimeEntry] {
-        guard let watch = selectedWatch else { return [] }
-        return manager.entries(for: watch).sorted { $0.recorded < $1.recorded }
-    }
-
-    private var latestEntry: TimeEntry? {
-        filteredEntries.last { $0.custom != nil }
-    }
-
-    private var averageWindow: [TimeEntry] {
-        let withCustom = filteredEntries.filter { $0.custom != nil }
-        guard !withCustom.isEmpty else { return [] }
-        guard let lastSyncIndex = withCustom.indices.last(where: { isSyncEvent(withCustom[$0]) }) else {
-            return withCustom
-        }
-        var windowEnd = withCustom.count - 1
-        if let nextSync = withCustom.indices.dropFirst(lastSyncIndex + 1).first(where: { isSyncEvent(withCustom[$0]) }) {
-            windowEnd = nextSync - 1
-        }
-        return Array(withCustom[lastSyncIndex...windowEnd])
-    }
+    // Cached computed values — only recalculated when entries change
+    @State private var cachedFilteredEntries: [TimeEntry] = []
+    @State private var cachedSyncEvents: [TimeEntry] = []
+    @State private var cachedDailyDeviations: [DailyDeviation] = []
+    @State private var cachedOverallAvg: Double? = nil
+    @State private var cachedLatestEntry: TimeEntry? = nil
+    @State private var cachedAverageWindowFirst: TimeEntry? = nil
 
     private struct DailyDeviation {
         let date: Date
@@ -437,14 +399,35 @@ struct StatisticsView: View {
         let sampleCount: Int
     }
 
-    private var dailyDeviations: [DailyDeviation] {
-        let window = averageWindow
-        guard !window.isEmpty else { return [] }
-        let calendar = Calendar.current
-        let grouped = Dictionary(grouping: window) { entry in
-            calendar.startOfDay(for: entry.recorded)
+    private func recompute() {
+        guard let watch = selectedWatch else {
+            cachedFilteredEntries = []
+            cachedSyncEvents = []
+            cachedDailyDeviations = []
+            cachedOverallAvg = nil
+            cachedLatestEntry = nil
+            return
         }
-        return grouped.keys.sorted().map { day in
+        let all = manager.entries(for: watch).sorted { $0.recorded < $1.recorded }
+        cachedFilteredEntries = all
+        cachedSyncEvents = all.filter { isSyncEvent($0) }.sorted { $0.recorded > $1.recorded }
+        cachedLatestEntry = all.last { $0.custom != nil }
+
+        let withCustom = all.filter { $0.custom != nil }
+        let window: [TimeEntry]
+        if let lastSyncIndex = withCustom.indices.last(where: { isSyncEvent(withCustom[$0]) }) {
+            var windowEnd = withCustom.count - 1
+            if let nextSync = withCustom.indices.dropFirst(lastSyncIndex + 1).first(where: { isSyncEvent(withCustom[$0]) }) {
+                windowEnd = nextSync - 1
+            }
+            window = Array(withCustom[lastSyncIndex...windowEnd])
+        } else {
+            window = withCustom
+        }
+
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: window) { calendar.startOfDay(for: $0.recorded) }
+        let days: [DailyDeviation] = grouped.keys.sorted().map { day in
             let entries = grouped[day]!
             let drifts = entries.compactMap { entry -> Double? in
                 guard let custom = entry.custom else { return nil }
@@ -454,12 +437,9 @@ struct StatisticsView: View {
             let avg = drifts.isEmpty ? 0.0 : drifts.reduce(0, +) / Double(drifts.count)
             return DailyDeviation(date: day, averageSeconds: avg, sampleCount: entries.count)
         }
-    }
-
-    private var overallAveragePerDay: Double? {
-        let days = dailyDeviations
-        guard !days.isEmpty else { return nil }
-        return days.map(\.averageSeconds).reduce(0, +) / Double(days.count)
+        cachedDailyDeviations = days
+        cachedOverallAvg = days.isEmpty ? nil : days.map(\.averageSeconds).reduce(0, +) / Double(days.count)
+        cachedAverageWindowFirst = window.first
     }
 
     private func formattedAvg(_ seconds: Double) -> String {
@@ -476,7 +456,7 @@ struct StatisticsView: View {
                                        systemImage: "watchface.applewatch.case",
                                        description: Text("Select a watch in the Watches tab to view statistics."))
                 .navigationTitle("Statistics")
-            } else if filteredEntries.isEmpty {
+            } else if cachedFilteredEntries.isEmpty {
                 ContentUnavailableView("No Statistics Yet",
                                        systemImage: "chart.bar",
                                        description: Text("Record some times for \(selectedWatch!.name) to see statistics here."))
@@ -484,7 +464,7 @@ struct StatisticsView: View {
             } else {
                 List {
                     Section("Latest Measurement") {
-                        if let entry = latestEntry, let custom = entry.custom {
+                        if let entry = cachedLatestEntry, let custom = entry.custom {
                             HStack {
                                 Label("Recorded", systemImage: "iphone")
                                 Spacer()
@@ -510,10 +490,10 @@ struct StatisticsView: View {
                     }
 
                     Section {
-                        if dailyDeviations.isEmpty {
+                        if cachedDailyDeviations.isEmpty {
                             Text("Not enough data yet.").foregroundStyle(.secondary)
                         } else {
-                            if let overall = overallAveragePerDay {
+                            if let overall = cachedOverallAvg {
                                 HStack {
                                     Label("Overall Avg / Day", systemImage: "function")
                                     Spacer()
@@ -521,7 +501,7 @@ struct StatisticsView: View {
                                         .monospacedDigit().foregroundStyle(.secondary)
                                 }
                             }
-                            ForEach(dailyDeviations, id: \.date) { day in
+                            ForEach(cachedDailyDeviations, id: \.date) { day in
                                 HStack {
                                     Text(day.date, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day())
                                     Spacer()
@@ -535,9 +515,25 @@ struct StatisticsView: View {
                     } header: {
                         Text("Average Deviation Per Day Since Last Sync")
                     } footer: {
-                        if let first = averageWindow.first {
+                        if let first = cachedAverageWindowFirst {
                             Text("Window starts \(first.recorded, format: .dateTime.month().day().hour().minute())")
                                 .font(.footnote)
+                        }
+                    }
+                    Section("Sync Events") {
+                        if cachedSyncEvents.isEmpty {
+                            Text("No sync events yet.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(cachedSyncEvents) { entry in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(entry.recorded, format: .dateTime.weekday(.wide).month(.abbreviated).day().year())
+                                        .font(.headline)
+                                    Text(entry.recorded, format: .dateTime.hour().minute().second())
+                                        .font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 2)
+                            }
                         }
                     }
                 }
@@ -545,50 +541,9 @@ struct StatisticsView: View {
                 .navigationTitle(selectedWatch?.name ?? "Statistics")
             }
         }
-    }
-}
-
-// MARK: - SyncView
-
-struct SyncView: View {
-    @ObservedObject var manager: TimeEntryManager
-    @Binding var selectedWatch: Watch?
-
-    private var syncEvents: [TimeEntry] {
-        guard let watch = selectedWatch else { return [] }
-        return manager.entries(for: watch)
-            .filter { isSyncEvent($0) }
-            .sorted { $0.recorded > $1.recorded }
-    }
-
-    var body: some View {
-        NavigationStack {
-            if selectedWatch == nil {
-                ContentUnavailableView("No Watch Selected",
-                                       systemImage: "arrow.triangle.2.circlepath",
-                                       description: Text("Select a watch in the Watches tab to view sync events."))
-                .navigationTitle("Sync")
-            } else if syncEvents.isEmpty {
-                ContentUnavailableView("No Sync Events",
-                                       systemImage: "arrow.triangle.2.circlepath",
-                                       description: Text("A sync event occurs when the watch time matches the recorded time exactly."))
-                .navigationTitle("Sync")
-            } else {
-                List {
-                    ForEach(syncEvents) { entry in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(entry.recorded, format: .dateTime.weekday(.wide).month(.abbreviated).day().year())
-                                .font(.headline)
-                            Text(entry.recorded, format: .dateTime.hour().minute().second())
-                                .font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
-                .listStyle(.insetGrouped)
-                .navigationTitle("Sync – \(selectedWatch?.name ?? "")")
-            }
-        }
+        .onAppear { recompute() }
+        .onChange(of: selectedWatch) { recompute() }
+        .onChange(of: manager.entries) { recompute() }
     }
 }
 
@@ -596,37 +551,53 @@ struct SyncView: View {
 
 struct ContentView: View {
 
-    @ObservedObject var manager: TimeEntryManager
+    @EnvironmentObject var manager: TimeEntryManager
     @Binding var selectedWatch: Watch?
     @State private var editingEntryID: UUID? = nil
     @State private var activeSheet: ActiveSheet? = nil
     @State private var customHour: Int = Calendar.current.component(.hour, from: Date())
     @State private var customMinute: Int = Calendar.current.component(.minute, from: Date())
     @State private var customSecond: Int = Calendar.current.component(.second, from: Date())
+    @State private var currentTime: Date = Date()
+    @State private var isVisible: Bool = false
+    private let clockTimer = Timer.publish(every: 1, tolerance: 0.5, on: .main, in: .common)
+    @State private var clockCancellable: AnyCancellable? = nil
 
-    private var watchEntries: [TimeEntry] {
-        guard let watch = selectedWatch else { return [] }
-        return manager.entries(for: watch)
+    @State private var watchEntries: [TimeEntry] = []
+
+    private func refreshEntries() {
+        guard let watch = selectedWatch else { watchEntries = []; return }
+        watchEntries = manager.entries(for: watch)
     }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 12) {
 
-                // Live Clock
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    let now = context.date
-                    HStack {
-                        Image(systemName: "clock")
-                            .imageScale(.large)
-                            .foregroundStyle(.tint)
-                        Text(now, format: .dateTime.hour().minute().second())
-                            .font(.system(size: 34, weight: .semibold, design: .rounded))
-                            .monospacedDigit()
-                        Spacer()
-                    }
-                    .padding(.horizontal)
+                // Live Clock — only ticks when view is visible
+                HStack {
+                    Image(systemName: "clock")
+                        .imageScale(.large)
+                        .foregroundStyle(.tint)
+                    Text(currentTime, format: .dateTime.hour().minute().second())
+                        .font(.system(size: 34, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                    Spacer()
                 }
+                .padding(.horizontal)
+                .onAppear {
+                    currentTime = Date()
+                    clockCancellable = clockTimer.autoconnect().sink { date in
+                        currentTime = date
+                    }
+                    refreshEntries()
+                }
+                .onDisappear {
+                    clockCancellable?.cancel()
+                    clockCancellable = nil
+                }
+                .onChange(of: selectedWatch) { refreshEntries() }
+                .onChange(of: manager.entries) { refreshEntries() }
 
                 // Watch picker banner
                 if !manager.watches.isEmpty {
@@ -655,19 +626,6 @@ struct ContentView: View {
                     .buttonStyle(.bordered)
                     .padding(.horizontal)
                 }
-
-                // Export CSV
-                Button {
-                    if let url = manager.getCSVURL(for: selectedWatch) {
-                        activeSheet = .exporter(url)
-                    }
-                } label: {
-                    Label("Export CSV", systemImage: "square.and.arrow.up")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .padding(.horizontal)
 
                 // Entries List
                 if selectedWatch == nil {
@@ -850,6 +808,107 @@ struct ContentView: View {
     }
 }
 
+// MARK: - FunctionsView
+
+struct FunctionsView: View {
+    @EnvironmentObject var manager: TimeEntryManager
+    @Binding var selectedWatch: Watch?
+
+    @State private var exportURL: URL? = nil
+    @State private var showingExporter = false
+    @State private var showingImporter = false
+    @State private var importResult: ImportResult? = nil
+    @State private var showingImportAlert = false
+
+    enum ImportResult {
+        case success(Int)
+        case failure(String)
+
+        var title: String {
+            switch self {
+            case .success: return "Import Successful"
+            case .failure: return "Import Failed"
+            }
+        }
+
+        var message: String {
+            switch self {
+            case .success(let count): return "\(count) entries imported."
+            case .failure(let reason): return reason
+            }
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Export") {
+                    Button {
+                        if let url = manager.getCSVURL(for: selectedWatch) {
+                            exportURL = url
+                            showingExporter = true
+                        }
+                    } label: {
+                        Label("Export CSV", systemImage: "square.and.arrow.up")
+                    }
+                    if selectedWatch != nil {
+                        Text("Exports entries for the selected watch only.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("No watch selected — will export all entries.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Import") {
+                    Button {
+                        showingImporter = true
+                    } label: {
+                        Label("Import CSV", systemImage: "square.and.arrow.down")
+                    }
+                    Text("CSV must match the export format: Watch, Recorded Time, Custom Time, Delta Seconds.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Functions")
+            .sheet(isPresented: $showingExporter) {
+                if let url = exportURL {
+                    ShareSheet(activityItems: [url])
+                }
+            }
+            .fileImporter(
+                isPresented: $showingImporter,
+                allowedContentTypes: [.commaSeparatedText, .plainText],
+                allowsMultipleSelection: false
+            ) { [manager] result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    let count = manager.importCSV(from: url)
+                    if count >= 0 {
+                        importResult = .success(count)
+                    } else {
+                        importResult = .failure("Could not parse the CSV file. Make sure it matches the export format.")
+                    }
+                    showingImportAlert = true
+                case .failure(let error):
+                    importResult = .failure(error.localizedDescription)
+                    showingImportAlert = true
+                }
+            }
+            .alert(importResult?.title ?? "", isPresented: $showingImportAlert) {
+                Button("OK") {}
+            } message: {
+                Text(importResult?.message ?? "")
+            }
+        }
+    }
+}
+
 // MARK: - ShareSheet
 
 struct ShareSheet: UIViewControllerRepresentable {
@@ -865,5 +924,18 @@ struct ShareSheet: UIViewControllerRepresentable {
 // MARK: - Preview
 
 #Preview {
-    RootView()
+    @Previewable @StateObject var manager = TimeEntryManager()
+    @Previewable @State var selectedWatch: Watch? = nil
+
+    TabView {
+        ContentView(selectedWatch: $selectedWatch)
+            .tabItem { Label("Home", systemImage: "house") }
+        StatisticsView(selectedWatch: $selectedWatch)
+            .tabItem { Label("Statistics", systemImage: "chart.bar") }
+        WatchesView(selectedWatch: $selectedWatch)
+            .tabItem { Label("Watches", systemImage: "watchface.applewatch.case") }
+        FunctionsView(selectedWatch: $selectedWatch)
+            .tabItem { Label("Functions", systemImage: "gearshape") }
+    }
+    .environmentObject(manager)
 }

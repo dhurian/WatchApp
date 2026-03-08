@@ -50,15 +50,28 @@ struct TimeEntry: Identifiable, Codable, Hashable {
 class TimeEntryManager: ObservableObject {
 
     @Published var entries: [TimeEntry] = [] {
-        didSet { saveEntries() }
+        didSet { scheduleSave() }
     }
 
     @Published var watches: [Watch] = [] {
-        didSet { saveWatches() }
+        didSet { scheduleSave() }
+    }
+
+    private var saveWorkItem: DispatchWorkItem?
+
+    private func scheduleSave() {
+        saveWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            self?.saveEntries()
+            self?.saveWatches()
+        }
+        saveWorkItem = item
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5, execute: item)
     }
 
     private let entriesURL: URL
     private let watchesURL: URL
+    private var imageCache: [String: UIImage] = [:]
 
     init() {
         let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -156,9 +169,16 @@ class TimeEntryManager: ObservableObject {
     }
 
     func loadPhoto(filename: String) -> UIImage? {
+        if let cached = imageCache[filename] { return cached }
         let url = photoURL(for: filename)
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return UIImage(data: data)
+        guard let data = try? Data(contentsOf: url),
+              let image = UIImage(data: data) else { return nil }
+        imageCache[filename] = image
+        return image
+    }
+
+    func clearImageCache() {
+        imageCache.removeAll()
     }
 
     func loadPhotos(for watch: Watch) -> [UIImage] {
@@ -166,6 +186,7 @@ class TimeEntryManager: ObservableObject {
     }
 
     func deletePhoto(filename: String, from watch: Watch) {
+        imageCache.removeValue(forKey: filename)
         let url = photoURL(for: filename)
         try? FileManager.default.removeItem(at: url)
         var updated = watch
@@ -176,6 +197,80 @@ class TimeEntryManager: ObservableObject {
     private func photoURL(for filename: String) -> URL {
         let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         return docDir.appendingPathComponent(filename)
+    }
+
+
+    // MARK: - CSV Import
+
+    /// Returns the number of entries imported, or -1 on parse failure.
+    func importCSV(from url: URL) -> Int {
+        guard url.startAccessingSecurityScopedResource() else { return -1 }
+        defer { url.stopAccessingSecurityScopedResource() }
+
+        guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return -1 }
+
+        let formatter = ISO8601DateFormatter()
+        var lines = raw.components(separatedBy: .newlines).filter { !$0.isEmpty }
+        guard lines.count > 1 else { return 0 }
+        lines.removeFirst() // skip header
+
+        var count = 0
+        for line in lines {
+            // Split on comma but respect quoted fields
+            let cols = parseCSVLine(line)
+            guard cols.count >= 3 else { continue }
+
+            let watchName = cols[0].trimmingCharacters(in: .whitespaces)
+            let recordedStr = cols[1].trimmingCharacters(in: .whitespaces)
+            let customStr = cols[2].trimmingCharacters(in: .whitespaces)
+
+            guard let recorded = formatter.date(from: recordedStr) else { continue }
+            let custom = customStr.isEmpty ? nil : formatter.date(from: customStr)
+
+            // Match or create watch by display name
+            var watchID: UUID? = nil
+            if !watchName.isEmpty {
+                if let existing = watches.first(where: { $0.displayName == watchName }) {
+                    watchID = existing.id
+                } else {
+                    let parts = watchName.components(separatedBy: " – ")
+                    let newWatch: Watch
+                    if parts.count == 2 {
+                        newWatch = Watch(name: parts[1], brand: parts[0])
+                    } else {
+                        newWatch = Watch(name: watchName)
+                    }
+                    addWatch(newWatch)
+                    watchID = newWatch.id
+                }
+            }
+
+            let entry = TimeEntry(recorded: recorded, custom: custom, watchID: watchID)
+            // Avoid duplicates: skip if same recorded time + watchID already exists
+            if !entries.contains(where: { $0.recorded == entry.recorded && $0.watchID == entry.watchID }) {
+                add(entry)
+                count += 1
+            }
+        }
+        return count
+    }
+
+    private func parseCSVLine(_ line: String) -> [String] {
+        var result: [String] = []
+        var current = ""
+        var inQuotes = false
+        for char in line {
+            if char == "\"" {
+                inQuotes.toggle()
+            } else if char == "," && !inQuotes {
+                result.append(current)
+                current = ""
+            } else {
+                current.append(char)
+            }
+        }
+        result.append(current)
+        return result
     }
 
     // MARK: - Persistence
