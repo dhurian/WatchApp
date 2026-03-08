@@ -270,5 +270,6 @@ struct ShareSheet: UIViewControllerRepresentable {
 // MARK: - Preview
 
 #Preview {
-    ContentView()
+    //ContentView()
+    RootView()
 }
