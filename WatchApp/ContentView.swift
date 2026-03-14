@@ -157,12 +157,12 @@ struct PhotoGalleryView: View {
     @EnvironmentObject var manager: TimeEntryManager
     let watch: Watch
     @State private var currentIndex: Int = 0
+    @State private var photos: [UIImage] = []
     @Environment(\.dismiss) private var dismiss
 
-    private var photos: [UIImage] {
-        manager.watches.first(where: { $0.id == watch.id })?.photoFilenames.compactMap {
-            manager.loadPhoto(filename: $0)
-        } ?? []
+    private func loadPhotos() {
+        let filenames = manager.watches.first(where: { $0.id == watch.id })?.photoFilenames ?? watch.photoFilenames
+        photos = filenames.compactMap { manager.loadPhoto(filename: $0) }
     }
 
     var body: some View {
@@ -192,6 +192,8 @@ struct PhotoGalleryView: View {
                     .padding(20)
             }
         }
+        .onAppear { loadPhotos() }
+        .onChange(of: manager.watches) { loadPhotos() }
     }
 }
 
@@ -206,6 +208,13 @@ struct WatchThumbnail: View {
     init(watch: Watch, size: CGFloat = 48) {
         self.watch = watch
         self.size = size
+    }
+
+    private func loadImage() {
+        let liveWatch = manager.watches.first(where: { $0.id == watch.id }) ?? watch
+        let filename = liveWatch.coverPhotoFilename ?? liveWatch.photoFilenames.first
+        guard let filename else { image = nil; return }
+        image = manager.loadPhoto(filename: filename)
     }
 
     var body: some View {
@@ -224,10 +233,9 @@ struct WatchThumbnail: View {
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: size * 0.2))
-        .task {
-            guard let filename = watch.photoFilenames.first else { return }
-            image = manager.loadPhoto(filename: filename)
-        }
+        .onAppear { loadImage() }
+        .onChange(of: watch.photoFilenames) { loadImage() }
+        .onChange(of: manager.watches) { loadImage() }
     }
 }
 
@@ -241,6 +249,7 @@ struct WatchFormSheet: View {
     @State private var brand: String = ""
     @State private var selectedPhoto: PhotosPickerItem? = nil
     @State private var newImages: [UIImage] = []
+    @State private var coverFilename: String? = nil
     @State private var showingCamera = false
     @State private var showingPhotoPicker = false
     @Environment(\.dismiss) private var dismiss
@@ -259,20 +268,39 @@ struct WatchFormSheet: View {
                         // Existing saved photos
                         ForEach(existingFilenames, id: \.self) { filename in
                             if let img = manager.loadPhoto(filename: filename) {
+                                let isCover = coverFilename == filename
                                 ZStack(alignment: .topTrailing) {
                                     Image(uiImage: img)
                                         .resizable()
                                         .scaledToFill()
                                         .frame(width: 90, height: 90)
                                         .clipShape(RoundedRectangle(cornerRadius: 12))
-                                    Button {
-                                        if let w = watch {
-                                            manager.deletePhoto(filename: filename, from: w)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(isCover ? Color.accentColor : Color.clear, lineWidth: 3)
+                                        )
+                                        .onTapGesture {
+                                            coverFilename = isCover ? nil : filename
                                         }
-                                    } label: {
-                                        Image(systemName: "minus.circle.fill")
-                                            .foregroundStyle(.white, .red)
-                                            .padding(4)
+                                    if isCover {
+                                        Image(systemName: "star.fill")
+                                            .font(.system(size: 14, weight: .bold))
+                                            .foregroundStyle(.white)
+                                            .padding(5)
+                                            .background(Color.accentColor)
+                                            .clipShape(Circle())
+                                            .padding(5)
+                                    } else {
+                                        Button {
+                                            if let w = watch {
+                                                if coverFilename == filename { coverFilename = nil }
+                                                manager.deletePhoto(filename: filename, from: w)
+                                            }
+                                        } label: {
+                                            Image(systemName: "minus.circle.fill")
+                                                .foregroundStyle(.white, .red)
+                                                .padding(4)
+                                        }
                                     }
                                 }
                             }
@@ -321,6 +349,13 @@ struct WatchFormSheet: View {
                     }
                     .padding(.vertical, 8)
                     .listRowBackground(Color.clear)
+
+                    if !existingFilenames.isEmpty {
+                        Text("Tap a photo to set it as the watch icon. Tap again to unset.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .listRowBackground(Color.clear)
+                    }
                 }
 
                 Section("Watch Details") {
@@ -340,6 +375,7 @@ struct WatchFormSheet: View {
                         if var existing = watch {
                             existing.name = trimmedName
                             existing.brand = brand.trimmingCharacters(in: .whitespaces)
+                            existing.coverPhotoFilename = coverFilename
                             manager.updateWatch(existing)
                             for img in newImages { _ = manager.addPhoto(img, to: existing) }
                         } else {
@@ -350,6 +386,10 @@ struct WatchFormSheet: View {
                                     newWatch = updated
                                 }
                             }
+                            if let cover = coverFilename {
+                                newWatch.coverPhotoFilename = cover
+                                manager.updateWatch(newWatch)
+                            }
                         }
                         dismiss()
                     }
@@ -359,6 +399,9 @@ struct WatchFormSheet: View {
             .onAppear {
                 name = watch?.name ?? ""
                 brand = watch?.brand ?? ""
+                if let w = watch {
+                    coverFilename = manager.watches.first(where: { $0.id == w.id })?.coverPhotoFilename ?? w.coverPhotoFilename
+                }
             }
             .onChange(of: selectedPhoto) { _, newItem in
                 Task {

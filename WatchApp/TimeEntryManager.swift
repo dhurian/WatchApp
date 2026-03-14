@@ -16,12 +16,14 @@ struct Watch: Identifiable, Codable, Hashable {
     var name: String
     var brand: String
     var photoFilenames: [String]
+    var coverPhotoFilename: String?
 
-    init(id: UUID = UUID(), name: String, brand: String = "", photoFilenames: [String] = []) {
+    init(id: UUID = UUID(), name: String, brand: String = "", photoFilenames: [String] = [], coverPhotoFilename: String? = nil) {
         self.id = id
         self.name = name
         self.brand = brand
         self.photoFilenames = photoFilenames
+        self.coverPhotoFilename = coverPhotoFilename
     }
 
     var displayName: String {
