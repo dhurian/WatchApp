@@ -996,6 +996,33 @@ struct ContentView: View {
     }
 
     @ViewBuilder
+    private func positionButton(_ pos: WatchPosition) -> some View {
+        let isSelected = customPosition == pos
+        Button {
+            customPosition = isSelected ? nil : pos
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: pos.systemImage)
+                    .font(.system(size: 28))
+                Text(pos.label)
+                    .font(.caption2)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(isSelected ? Color.accentColor.opacity(0.15) : Color(.systemGray6))
+            .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.5)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
     private var positionPicker: some View {
         VStack(spacing: 8) {
             Text("Watch Position")
@@ -1003,28 +1030,7 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
             HStack(spacing: 12) {
                 ForEach(WatchPosition.allCases, id: \.self) { pos in
-                    Button {
-                        customPosition = customPosition == pos ? nil : pos
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: pos.systemImage)
-                                .font(.system(size: 28))
-                            Text(pos.label)
-                                .font(.caption2)
-                                .multilineTextAlignment(.center)
-                                .lineLimit(2)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(customPosition == pos ? Color.accentColor.opacity(0.15) : Color(.systemGray6))
-                        .foregroundStyle(customPosition == pos ? .accentColor : .secondary)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(customPosition == pos ? Color.accentColor : Color.clear, lineWidth: 1.5)
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    positionButton(pos)
                 }
             }
             .padding(.horizontal)
