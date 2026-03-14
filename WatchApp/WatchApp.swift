@@ -26,6 +26,18 @@ struct WatchApp: App {
                     .tabItem { Label("Functions", systemImage: "gearshape") }
             }
             .environmentObject(manager)
+            .onAppear { autoSelectIfSingle() }
+            .onChange(of: manager.watches) { autoSelectIfSingle() }
+        }
+    }
+
+    private func autoSelectIfSingle() {
+        if manager.watches.count == 1 {
+            selectedWatch = manager.watches[0]
+        } else if let current = selectedWatch,
+                  !manager.watches.contains(where: { $0.id == current.id }) {
+            // Selected watch was deleted — clear selection
+            selectedWatch = nil
         }
     }
 }

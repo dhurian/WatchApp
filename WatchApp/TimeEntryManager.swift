@@ -29,6 +29,34 @@ struct Watch: Identifiable, Codable, Hashable {
     }
 }
 
+// MARK: - WatchPosition
+
+enum WatchPosition: String, Codable, CaseIterable {
+    case crownAt3   // crown toward 3 o'clock (hanging on left wrist, crown right)
+    case crownAt9   // crown toward 9 o'clock (crown left)
+    case dialUp     // dial face up
+    case dialDown   // dial face down
+
+    var label: String {
+        switch self {
+        case .crownAt3:  return "Crown at 3"
+        case .crownAt9:  return "Crown at 9"
+        case .dialUp:    return "Dial Up"
+        case .dialDown:  return "Dial Down"
+        }
+    }
+
+    // SF Symbol that best represents each position
+    var systemImage: String {
+        switch self {
+        case .crownAt3:  return "arrow.right.circle"
+        case .crownAt9:  return "arrow.left.circle"
+        case .dialUp:    return "arrow.up.circle"
+        case .dialDown:  return "arrow.down.circle"
+        }
+    }
+}
+
 // MARK: - TimeEntry Model
 
 struct TimeEntry: Identifiable, Codable, Hashable {
@@ -36,12 +64,14 @@ struct TimeEntry: Identifiable, Codable, Hashable {
     var recorded: Date
     var custom: Date?
     var watchID: UUID?
+    var position: WatchPosition?
 
-    init(id: UUID = UUID(), recorded: Date, custom: Date? = nil, watchID: UUID? = nil) {
+    init(id: UUID = UUID(), recorded: Date, custom: Date? = nil, watchID: UUID? = nil, position: WatchPosition? = nil) {
         self.id = id
         self.recorded = recorded
         self.custom = custom
         self.watchID = watchID
+        self.position = position
     }
 }
 
